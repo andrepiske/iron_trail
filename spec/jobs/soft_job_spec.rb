@@ -9,7 +9,7 @@ RSpec.describe SoftJob, type: 'job' do
     Sidekiq::Worker.clear_all
   end
 
-  describe 'IronTrail::SidekiqMiddleware' do
+  describe 'IronTrail::SidekiqMiddleware', :postgresql_only do
     subject(:update_trail!) do
       @queued_job_id = SoftJob.perform_async(person.id, 'Mars')
       SoftJob.drain

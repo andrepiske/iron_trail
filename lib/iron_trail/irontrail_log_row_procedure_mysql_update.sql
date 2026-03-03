@@ -9,12 +9,58 @@ BEGIN
   DECLARE v_actor_id TEXT DEFAULT NULL;
   DECLARE v_created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
   DECLARE v_metadata JSON DEFAULT NULL;
-  DECLARE v_delta JSON DEFAULT JSON_OBJECT();
+  DECLARE v_delta JSON;
   DECLARE v_updated_at_old TEXT DEFAULT NULL;
   DECLARE v_updated_at_new TEXT DEFAULT NULL;
+  DECLARE v_old_keys JSON;
+  DECLARE v_new_keys JSON;
+  DECLARE v_all_keys TEXT;
+  DECLARE v_key TEXT;
+  DECLARE v_old_val JSON;
+  DECLARE v_new_val JSON;
+  DECLARE i INT DEFAULT 0;
+  DECLARE j INT DEFAULT 0;
+  DECLARE v_old_keys_count INT;
+  DECLARE v_new_keys_count INT;
   
-  -- For MySQL, we'll store the full old and new data without computing delta
-  -- The delta can be computed in Ruby if needed
+  -- Initialize delta as empty object
+  SET v_delta = JSON_OBJECT();
+  
+  -- Get keys from old and new data
+  SET v_old_keys = JSON_KEYS(p_old_data);
+  SET v_new_keys = JSON_KEYS(p_new_data);
+  SET v_old_keys_count = JSON_LENGTH(v_old_keys);
+  SET v_new_keys_count = JSON_LENGTH(v_new_keys);
+  
+  -- Process keys from old data
+  SET i = 0;
+  WHILE i < v_old_keys_count DO
+    SET v_key = JSON_UNQUOTE(JSON_EXTRACT(v_old_keys, CONCAT('$[', i, ']')));
+    SET v_old_val = JSON_EXTRACT(p_old_data, CONCAT('$.', v_key));
+    SET v_new_val = JSON_EXTRACT(p_new_data, CONCAT('$.', v_key));
+    
+    -- Check if values are different (using JSON comparison)
+    IF NOT (v_old_val <=> v_new_val) THEN
+      SET v_delta = JSON_MERGE_PATCH(v_delta, JSON_OBJECT(v_key, JSON_ARRAY(v_old_val, v_new_val)));
+    END IF;
+    
+    SET i = i + 1;
+  END WHILE;
+  
+  -- Process keys that exist only in new data
+  SET j = 0;
+  WHILE j < v_new_keys_count DO
+    SET v_key = JSON_UNQUOTE(JSON_EXTRACT(v_new_keys, CONCAT('$[', j, ']')));
+    SET v_old_val = JSON_EXTRACT(p_old_data, CONCAT('$.', v_key));
+    
+    -- If key doesn't exist in old data (IS NULL), add it to delta
+    IF v_old_val IS NULL THEN
+      SET v_new_val = JSON_EXTRACT(p_new_data, CONCAT('$.', v_key));
+      SET v_delta = JSON_MERGE_PATCH(v_delta, JSON_OBJECT(v_key, JSON_ARRAY(CAST('null' AS JSON), v_new_val)));
+    END IF;
+    
+    SET j = j + 1;
+  END WHILE;
   
   -- Extract updated_at if present and changed
   SET v_updated_at_old = JSON_UNQUOTE(JSON_EXTRACT(p_old_data, '$.updated_at'));

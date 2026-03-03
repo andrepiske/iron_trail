@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-RSpec.describe Hotel do
+RSpec.describe Hotel, :postgresql_only do
   before do
     sql = <<~SQL
     SELECT setval('hotels_id_seq'::regclass, 5000, 't');
 
     INSERT INTO hotels (id, name, hotel_time, time_in_japan, room_map) VALUES
-      (100, 'Wonky', '2023-04-25 13:22:54.833 -0700', '2023-07-23 21:22:55.021 +9:00', $${
+      (100, 'Wonky', '2023-04-25 13:22:54.833 -0700', '2023-07-23 21:22:55.021 +9:00', $$${
         "floors": ["Floor 1", "Floor 2", "Gym"],
         "rooms": {
           "floor_1_room_22": "User:1234",
@@ -86,7 +86,7 @@ RSpec.describe Hotel do
   describe 'reifying JSONB columns' do
     before do
       ActiveRecord::Base.connection.execute(<<~SQL)
-        UPDATE hotels SET room_map=$${
+        UPDATE hotels SET room_map=$$${
             "floors": ["Floor 1", "Floor 2", "Gym"],
             "rooms": {
               "floor_1_room_22": "User:9001",

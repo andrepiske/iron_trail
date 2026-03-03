@@ -66,6 +66,45 @@ module IronTrail
       # This works by inspecting whether there are any keys in the rec_delta column
       # other than the columns specified in the `columns` parameter.
       def with_delta_other_than(*columns)
+        if mysql_adapter?
+          with_delta_other_than_mysql(columns)
+        else
+          with_delta_other_than_postgres(columns)
+        end
+      end
+
+      private
+
+      def mysql_adapter?
+        connection.adapter_name.downcase.include?('mysql')
+      end
+
+      def with_delta_other_than_mysql(columns)
+        return all if columns.empty?
+
+        # For MySQL, we need to check if rec_delta has any keys other than the specified columns.
+        # The method returns records that have changes in columns OTHER than the specified ones.
+        # 
+        # For example, with_delta_other_than(:updated_at) should return records that
+        # changed something other than just updated_at.
+        # 
+        # We want: rec_delta IS NULL (inserts/deletes) OR 
+        #          rec_delta has keys not in the columns list
+        
+        quoted_columns = columns.map { |col_name| connection.quote(col_name) }
+        columns_pattern = columns.join('|')
+        
+        # MySQL 8.0 approach using REGEXP to check JSON keys
+        # This checks if rec_delta contains any keys that don't match our excluded columns
+        sql = <<~SQL
+          rec_delta IS NULL OR 
+          JSON_KEYS(rec_delta) REGEXP '\\\\"(?!#{columns_pattern}\\\\")'
+        SQL
+        
+        where(::Arel::Nodes::SqlLiteral.new(sql))
+      end
+
+      def with_delta_other_than_postgres(columns)
         quoted_columns = columns.map { |col_name| connection.quote(col_name) }
         exclude_array = "ARRAY[#{quoted_columns.join(', ')}]::text[]"
 
@@ -73,26 +112,53 @@ module IronTrail
         where(::Arel::Nodes::SqlLiteral.new(sql))
       end
 
-      private
-
       def _where_object_changes(ary_index, args)
         ary_index = Integer(ary_index)
         scope = all
 
         args.each do |col_name, value|
-          col_delta = "rec_delta->#{connection.quote(col_name)}"
-          node = if value == nil
-            ::Arel::Nodes::SqlLiteral.new("#{col_delta}->#{ary_index} = 'null'::jsonb")
+          if mysql_adapter?
+            scope = _where_object_changes_mysql(scope, ary_index, col_name, value)
           else
-            ::Arel::Nodes::SqlLiteral.new("#{col_delta}->>#{ary_index}").eq(
-              ::Arel::Nodes::BindParam.new(value.to_s)
-            )
+            scope = _where_object_changes_postgres(scope, ary_index, col_name, value)
           end
-
-          scope.where!(node)
         end
 
         scope
+      end
+
+      def _where_object_changes_mysql(scope, ary_index, col_name, value)
+        # MySQL uses JSON_UNQUOTE(JSON_EXTRACT(...)) instead of ->>
+        # Don't quote the column name for JSON path - just escape it if needed
+        safe_col_name = col_name.to_s.gsub("'", "\\'")
+        
+        node = if value == nil
+          # For NULL values in MySQL
+          sql = "JSON_UNQUOTE(JSON_EXTRACT(rec_delta, '$.\"#{safe_col_name}\"[#{ary_index}]')) IS NULL"
+          ::Arel::Nodes::SqlLiteral.new(sql)
+        else
+          # For non-NULL values in MySQL
+          sql = "JSON_UNQUOTE(JSON_EXTRACT(rec_delta, '$.\"#{safe_col_name}\"[#{ary_index}]'))"
+          ::Arel::Nodes::SqlLiteral.new(sql).eq(
+            ::Arel::Nodes::BindParam.new(value.to_s)
+          )
+        end
+
+        scope.where(node)
+      end
+
+      def _where_object_changes_postgres(scope, ary_index, col_name, value)
+        col_delta = "rec_delta->#{connection.quote(col_name)}"
+        
+        node = if value == nil
+          ::Arel::Nodes::SqlLiteral.new("#{col_delta}->#{ary_index} = 'null'::jsonb")
+        else
+          ::Arel::Nodes::SqlLiteral.new("#{col_delta}->>#{ary_index}").eq(
+            ::Arel::Nodes::BindParam.new(value.to_s)
+          )
+        end
+
+        scope.where(node)
       end
     end
   end

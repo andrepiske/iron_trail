@@ -20,10 +20,15 @@ RSpec.describe IronTrail::DbFunctions do
 
     before do
       if mysql_adapter
+        connection.execute('DROP TABLE IF EXISTS qux;')
         connection.execute('CREATE TABLE qux (foo VARCHAR(255));')
       else
         connection.execute('CREATE TABLE qux (foo TEXT);')
       end
+    end
+
+    after do
+      connection.execute('DROP TABLE IF EXISTS qux;') if mysql_adapter
     end
 
     it 'contains all tables' do
@@ -50,6 +55,7 @@ RSpec.describe IronTrail::DbFunctions do
     context 'with extra untracked tables', :postgresql_only do
       before do
         if mysql_adapter
+          connection.execute('DROP TABLE IF EXISTS foo, bar;')
           connection.execute('CREATE TABLE foo (id INT);')
           connection.execute('CREATE TABLE bar (id INT);')
           connection.execute("CREATE TRIGGER iron_trail_log_changes_insert AFTER INSERT ON bar FOR EACH ROW BEGIN CALL irontrail_log_row_insert('bar', CAST(NEW.id AS CHAR), JSON_OBJECT('id', NEW.id)); END;")
@@ -61,6 +67,12 @@ RSpec.describe IronTrail::DbFunctions do
             CREATE TRIGGER iron_trail_log_changes AFTER INSERT OR UPDATE OR DELETE ON
               bar FOR EACH ROW EXECUTE FUNCTION irontrail_log_row();
           SQL
+        end
+      end
+
+      after do
+        if mysql_adapter
+          connection.execute('DROP TABLE IF EXISTS foo, bar;')
         end
       end
 
@@ -92,10 +104,15 @@ RSpec.describe IronTrail::DbFunctions do
     context 'with new untracked tables' do
       before do
         if mysql_adapter
+          connection.execute('DROP TABLE IF EXISTS foobar;')
           connection.execute('CREATE TABLE foobar (id INT);')
         else
           connection.execute('CREATE TABLE foobar (id INTEGER);')
         end
+      end
+
+      after do
+        connection.execute('DROP TABLE IF EXISTS foobar;') if mysql_adapter
       end
 
       it 'does not include untracked tables' do

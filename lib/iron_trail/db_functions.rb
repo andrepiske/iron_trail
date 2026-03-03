@@ -273,6 +273,7 @@ module IronTrail
 
     def enable_tracking_for_table_mysql(table_name)
       quoted_table = connection.quote_table_name(table_name)
+      pk_column = mysql_primary_key_column(table_name)
       
       # Drop existing triggers first (if any) - trigger names must include table name to be unique
       %w[insert update delete].each do |operation|
@@ -287,7 +288,7 @@ module IronTrail
         BEGIN
           CALL irontrail_log_row_insert(
             '#{table_name}',
-            CAST(NEW.id AS CHAR),
+            CAST(NEW.#{pk_column} AS CHAR),
             JSON_OBJECT(
               #{mysql_table_columns(table_name).map { |col| "'#{col}', NEW.#{connection.quote_column_name(col)}" }.join(', ')}
             )
@@ -303,7 +304,7 @@ module IronTrail
         BEGIN
           CALL irontrail_log_row_update(
             '#{table_name}',
-            CAST(NEW.id AS CHAR),
+            CAST(NEW.#{pk_column} AS CHAR),
             JSON_OBJECT(
               #{mysql_table_columns(table_name).map { |col| "'#{col}', OLD.#{connection.quote_column_name(col)}" }.join(', ')}
             ),
@@ -322,7 +323,7 @@ module IronTrail
         BEGIN
           CALL irontrail_log_row_delete(
             '#{table_name}',
-            CAST(OLD.id AS CHAR),
+            CAST(OLD.#{pk_column} AS CHAR),
             JSON_OBJECT(
               #{mysql_table_columns(table_name).map { |col| "'#{col}', OLD.#{connection.quote_column_name(col)}" }.join(', ')}
             )
@@ -344,6 +345,25 @@ module IronTrail
       SQL
       
       connection.execute(stmt).map { |row| row[0] }
+    end
+
+    def mysql_primary_key_column(table_name)
+      # Query information_schema to get the primary key column
+      stmt = <<~SQL
+        SELECT COLUMN_NAME
+        FROM information_schema.key_column_usage
+        WHERE table_schema = DATABASE()
+        AND table_name = '#{table_name}'
+        AND constraint_name = 'PRIMARY'
+        LIMIT 1;
+      SQL
+      
+      result = connection.execute(stmt)
+      if result.any?
+        result.first[0]
+      else
+        'id' # fallback to 'id' if no primary key found
+      end
     end
   end
 end
