@@ -14,30 +14,34 @@ permissions:
 
 jobs:
   test:
-    name: Ruby ${{ matrix.ruby }}, ${{ matrix.gemfile }}.gemfile, PG ${{ matrix.postgres }}
+    name: Ruby ${{ matrix.ruby }}, ${{ matrix.gemfile }}.gemfile, MySQL ${{ matrix.mysql }}
     runs-on: ubuntu-latest
     services:
-      test-postgres:
-        image: postgres:${{ matrix.postgres }}
+      test-mysql:
+        image: mysql:${{ matrix.mysql }}
         ports:
-        - 5432:5432
+        - 3306:3306
         env:
-          POSTGRES_PASSWORD: foobar123
+          MYSQL_ROOT_PASSWORD: foobar123
+          MYSQL_DATABASE: iron_trail_test
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     strategy:
       matrix:
         include:
-        # very old
-        - { gemfile: 'rails_7.1', ruby: '3.3', postgres: '15' }
         # old
-        - { gemfile: 'rails_7.2', ruby: '3.3', postgres: '16' }
-        - { gemfile: 'rails_7.2', ruby: '3.3', postgres: '17' }
+        - { gemfile: 'rails_7.1', ruby: '3.3', mysql: '8.0' }
+        - { gemfile: 'rails_7.2', ruby: '3.3', mysql: '8.0' }
         # current
-        - { gemfile: 'rails_8.0', ruby: '3.4', postgres: '17' }
-        - { gemfile: 'rails_8.0', ruby: '3.4', postgres: '18' }
+        - { gemfile: 'rails_8.0', ruby: '3.4', mysql: '8.0' }
+        - { gemfile: 'rails_8.0', ruby: '3.4', mysql: '8.4' }
+        - { gemfile: 'rails_8.1', ruby: '3.4', mysql: '8.4' }
         # futuristic
-        - { gemfile: 'rails_8.1', ruby: 'head', postgres: '17', experimental: true }
-        - { gemfile: 'rails_8.1', ruby: 'head', postgres: '18', experimental: true }
-        - { gemfile: 'rails_head', ruby: 'head', postgres: '18', experimental: true }
+        - { gemfile: 'rails_8.1', ruby: 'head', mysql: '8.4', experimental: true }
+        - { gemfile: 'rails_head', ruby: 'head', mysql: '8.4', experimental: true }
     continue-on-error: ${{ matrix.experimental || false }}
     steps:
     - name: Checkout source
@@ -49,26 +53,15 @@ jobs:
         bundler-cache: true
       env:
         BUNDLE_GEMFILE: gemfiles/${{ matrix.gemfile }}.gemfile
-    - name: Create database
-      run: |
-        createdb \
-          --host=$POSTGRES_HOST \
-          --port=$POSTGRES_PORT \
-          --username=postgres \
-          dummy
-      env:
-        PGPASSWORD: foobar123
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
     - name: Run specs
       run:
         bundle exec rake install_database_yml spec && bundle exec rake testing_spec
       env:
         BACKTRACE: 1
         BUNDLE_GEMFILE: gemfiles/${{ matrix.gemfile }}.gemfile
-        DB: postgres
-        IRONTRAIL_CI_DATABASE: dummy
-        IRONTRAIL_CI_DB_USER: postgres
+        DB: mysql
+        IRONTRAIL_CI_DATABASE: iron_trail_test
+        IRONTRAIL_CI_DB_USER: root
         IRONTRAIL_CI_DB_PASSWORD: foobar123
         IRONTRAIL_CI_DB_HOST: 127.0.0.1
-        IRONTRAIL_CI_DB_PORT: 5432
+        IRONTRAIL_CI_DB_PORT: 3306

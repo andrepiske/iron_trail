@@ -22,8 +22,13 @@ RSpec.describe IronTrail::QueryTransformer do
     let(:is_write_query) { true }
     let(:metadata) { { 'some' => 'data', another: 19191919 } }
 
-    it 'appends metadata' do
-      expect(transformed_query).to eq '/*IronTrail {"some":"data","another":19191919} IronTrail*/ insert into foobar'
+    it 'sets metadata via MySQL session variable and returns query unchanged' do
+      expect(transformed_query).to eq(query)
+
+      # Verify the session variable was set
+      result = ActiveRecord::Base.connection.select_value("SELECT @irontrail_metadata")
+      parsed = JSON.parse(result)
+      expect(parsed).to eq({ 'some' => 'data', 'another' => 19191919 })
     end
 
     context 'when it is not a write query' do

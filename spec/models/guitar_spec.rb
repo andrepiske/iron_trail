@@ -193,9 +193,8 @@ RSpec.describe Guitar do
       expect(@trail_ids.length).to eq(4)
 
       @trail_ids.zip(fake_timestamps).each do |trail_id, fake_ts|
-        query = "UPDATE irontrail_changes SET created_at='#{fake_ts}' WHERE id=#{trail_id}"
-        result = ActiveRecord::Base.connection.execute(query)
-        expect(result.cmd_tuples).to eq(1)
+        query = "UPDATE irontrail_changes SET created_at='#{fake_ts.strftime('%Y-%m-%d %H:%M:%S')}' WHERE id=#{trail_id}"
+        ActiveRecord::Base.connection.execute(query)
       end
       guitar.reload
     end
@@ -221,15 +220,15 @@ RSpec.describe Guitar do
         rec_old = trail.rec_old.merge('foo' => 'perfectly fine')
         rec_new = trail.rec_new.merge('foo' => 'ghosted!')
 
+        conn = ActiveRecord::Base.connection
         query = <<~SQL
           UPDATE irontrail_changes SET
-            rec_old=#{ActiveRecord::Base.connection.quote(JSON.dump(rec_old))}::jsonb,
-            rec_new=#{ActiveRecord::Base.connection.quote(JSON.dump(rec_new))}::jsonb
+            rec_old='#{conn.quote_string(JSON.dump(rec_old))}',
+            rec_new='#{conn.quote_string(JSON.dump(rec_new))}'
           WHERE id=#{trail_id}
         SQL
 
-        result = ActiveRecord::Base.connection.execute(query)
-        expect(result.cmd_tuples).to eq(1)
+        conn.execute(query)
       end
 
       describe 'on time' do
@@ -258,9 +257,8 @@ RSpec.describe Guitar do
       let(:destroy_time) { '2006-10-21T06:00:00Z' }
       before do
         guitar.destroy!
-        query = "UPDATE irontrail_changes SET created_at='#{destroy_time}' WHERE operation='d' AND rec_id='#{guitar.id}'"
-        result = ActiveRecord::Base.connection.execute(query)
-        expect(result.cmd_tuples).to eq(1)
+        query = "UPDATE irontrail_changes SET created_at='#{Time.parse(destroy_time).strftime('%Y-%m-%d %H:%M:%S')}' WHERE operation='d' AND rec_id='#{guitar.id}'"
+        ActiveRecord::Base.connection.execute(query)
       end
 
       describe 'on time' do

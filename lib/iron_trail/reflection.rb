@@ -21,13 +21,13 @@ module IronTrail
       foreign_key_column_name = foreign_key_column_names.first
 
       # record_id is always of type text, but the foreign table primary key
-      # could be anything (int, uuid, ...), so let's cast it to text.
+      # could be anything (int, uuid, ...), so let's cast it to char.
       foreign_value = ::Arel::Nodes::NamedFunction.new(
         'CAST',
         [
           ::Arel::Nodes::As.new(
             foreign_table[foreign_key_column_name],
-            ::Arel::Nodes::SqlLiteral.new('text')
+            ::Arel::Nodes::SqlLiteral.new('CHAR')
           ),
         ]
       )

@@ -32,7 +32,7 @@ module IronTrail
       if db_fun.function_present?
         db_fun.enable_tracking_for_table(table_name)
       else
-        Rails.logger.warn("IronTrail will not create trigger for table #{table_name} because the trigger function does not exist in the database.")
+        Rails.logger.warn("IronTrail will not create trigger for table #{table_name} because the stored procedure does not exist in the database.")
       end
 
       result

@@ -2,7 +2,7 @@
 
 ENV['RAILS_ENV'] ||= 'test'
 ENV['RACK_ENV'] ||= ENV['RAILS_ENV']
-ENV['DB'] ||= 'postgres'
+ENV['DB'] ||= 'mysql'
 
 RSpec.configure do |config|
   config.order = :random
@@ -12,6 +12,8 @@ RSpec.configure do |config|
   config.before do
     IronTrail::Current.reset
     IronTrail.config.reset!
+    # Clear the MySQL session variable for metadata
+    ActiveRecord::Base.connection.execute("SET @irontrail_metadata = NULL")
   end
 end
 

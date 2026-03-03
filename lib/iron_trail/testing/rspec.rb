@@ -27,24 +27,18 @@ module IronTrail
       attr_accessor :enabled
 
       def enable!
-        DbFunctions.new(ActiveRecord::Base.connection).install_functions
+        conn = ActiveRecord::Base.connection
+        # Use session variable to enable the stored procedure.
+        # This avoids DDL (DROP/CREATE PROCEDURE) which would implicitly
+        # commit any open transaction and break transactional test fixtures.
+        conn.execute("SET @irontrail_disabled = NULL")
         @enabled = true
       end
 
       def disable!
-        # We "disable" it by replacing the trigger function by a no-op one.
-        # This should be faster than adding/removing triggers from several
-        # tables every time.
-        sql = <<~SQL
-          CREATE OR REPLACE FUNCTION irontrail_log_row()
-          RETURNS TRIGGER AS $$
-          BEGIN
-            RETURN NULL;
-          END;
-          $$ LANGUAGE plpgsql;
-        SQL
-
-        ActiveRecord::Base.connection.execute(sql)
+        conn = ActiveRecord::Base.connection
+        # Use session variable to make the stored procedure a no-op.
+        conn.execute("SET @irontrail_disabled = 1")
         @enabled = false
       end
 

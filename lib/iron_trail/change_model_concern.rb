@@ -26,13 +26,6 @@ module IronTrail
     # This mimics the method with the same name available in the papertrail gem.
     # It is an extended rec_delta, where attributes values are properly deserialized
     # as rails' ActiveRecord would do.
-    #
-    # For instance, timestamps are serialized as strings in JSON, so rec_delta
-    # would return strings for timestamps. Using this method, it'd return a proper
-    # timestamp deserialized from the string.
-    #
-    # This method doesn't do caching and always computes the full thing. It's
-    # up to the user to perform caching if wanted.
     def compute_changeset
       return nil unless update_operation?
 
@@ -58,19 +51,19 @@ module IronTrail
       end
 
       # Allows filtering out updates that changed just a certain set of columns.
-      # This could be useful, for instance, to filter out updates made with
-      # ActiveRecord's #touch method, which changes only the updated_at column.
-      # In that case, calling `.with_delta_other_than(:updated_at)` would exclude
-      # such changes from the result.
-      #
-      # This works by inspecting whether there are any keys in the rec_delta column
-      # other than the columns specified in the `columns` parameter.
+      # MySQL version using JSON functions.
       def with_delta_other_than(*columns)
-        quoted_columns = columns.map { |col_name| connection.quote(col_name) }
-        exclude_array = "ARRAY[#{quoted_columns.join(', ')}]::text[]"
-
-        sql = "rec_delta IS NULL OR (rec_delta - #{exclude_array}) <> '{}'::jsonb"
-        where(::Arel::Nodes::SqlLiteral.new(sql))
+        if columns.empty?
+          where(::Arel::Nodes::SqlLiteral.new("rec_delta IS NULL OR JSON_LENGTH(rec_delta) > 0"))
+        else
+          # Build a condition: after removing listed keys from rec_delta, check if any remain
+          removal_expr = 'rec_delta'
+          columns.each do |col_name|
+            removal_expr = "JSON_REMOVE(#{removal_expr}, #{connection.quote("$.#{col_name}")})"
+          end
+          sql = "rec_delta IS NULL OR (#{removal_expr} IS NOT NULL AND JSON_LENGTH(#{removal_expr}) > 0)"
+          where(::Arel::Nodes::SqlLiteral.new(sql))
+        end
       end
 
       private
@@ -80,12 +73,15 @@ module IronTrail
         scope = all
 
         args.each do |col_name, value|
-          col_delta = "rec_delta->#{connection.quote(col_name)}"
+          json_path = "$.#{col_name}[#{ary_index}]"
+
           node = if value == nil
-            ::Arel::Nodes::SqlLiteral.new("#{col_delta}->#{ary_index} = 'null'::jsonb")
+            ::Arel::Nodes::SqlLiteral.new(
+              "JSON_EXTRACT(rec_delta, #{connection.quote(json_path)}) = CAST('null' AS JSON)"
+            )
           else
-            ::Arel::Nodes::SqlLiteral.new("#{col_delta}->>#{ary_index}").eq(
-              ::Arel::Nodes::BindParam.new(value.to_s)
+            ::Arel::Nodes::SqlLiteral.new(
+              "JSON_UNQUOTE(JSON_EXTRACT(rec_delta, #{connection.quote(json_path)})) = #{connection.quote(value.to_s)}"
             )
           end
 
