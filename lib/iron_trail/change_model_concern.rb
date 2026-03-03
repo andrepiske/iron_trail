@@ -79,29 +79,30 @@ module IronTrail
         connection.adapter_name.downcase.include?('mysql')
       end
 
-      def with_delta_other_than_mysql(columns)
+def with_delta_other_than_mysql(columns)
         return all if columns.empty?
 
         # For MySQL, we need to check if rec_delta has any keys other than the specified columns.
-        # The method returns records that have changes in columns OTHER than the specified ones.
+        # We use JSON_REMOVE to remove all the excluded columns, then check if anything remains.
         # 
-        # For example, with_delta_other_than(:updated_at) should return records that
-        # changed something other than just updated_at.
+        # JSON_REMOVE takes multiple path arguments. We need to build paths like '$.col1', '$.col2'
+        # If all keys are removed, JSON_REMOVE returns NULL (or an empty object in some cases).
         # 
         # We want: rec_delta IS NULL (inserts/deletes) OR 
-        #          rec_delta has keys not in the columns list
+        #          JSON_REMOVE(...) is not empty (has other changes)
         
-        quoted_columns = columns.map { |col_name| connection.quote(col_name) }
-        columns_pattern = columns.join('|')
+        # Build the JSON_REMOVE paths
+        paths = columns.map { |col| connection.quote("$.#{col}") }
         
-        # MySQL 8.0 approach using REGEXP to check JSON keys
-        # This checks if rec_delta contains any keys that don't match our excluded columns
-        sql = <<~SQL
-          rec_delta IS NULL OR 
-          JSON_KEYS(rec_delta) REGEXP '\\\\"(?!#{columns_pattern}\\\\")'
-        SQL
-        
-        where(::Arel::Nodes::SqlLiteral.new(sql))
+        if paths.empty?
+          # No columns to exclude, so all records pass
+          all
+        else
+          # Build: rec_delta IS NULL OR JSON_REMOVE(rec_delta, '$.col1', '$.col2', ...) != CAST('{}' AS JSON)
+          remove_expr = "JSON_REMOVE(rec_delta, #{paths.join(', ')})"
+          sql = "rec_delta IS NULL OR (#{remove_expr} IS NOT NULL AND #{remove_expr} != CAST('{}' AS JSON))"
+          where(::Arel::Nodes::SqlLiteral.new(sql))
+        end
       end
 
       def with_delta_other_than_postgres(columns)
@@ -128,20 +129,22 @@ module IronTrail
       end
 
       def _where_object_changes_mysql(scope, ary_index, col_name, value)
-        # MySQL uses JSON_UNQUOTE(JSON_EXTRACT(...)) instead of ->>
-        # Don't quote the column name for JSON path - just escape it if needed
+        # MySQL uses JSON functions for JSON queries
+        # Path syntax: '$."column_name"[index]' for accessing array elements in rec_delta
         safe_col_name = col_name.to_s.gsub("'", "\\'")
+        path = "$.\"#{safe_col_name}\""
         
-        node = if value == nil
-          # For NULL values in MySQL
-          sql = "JSON_UNQUOTE(JSON_EXTRACT(rec_delta, '$.\"#{safe_col_name}\"[#{ary_index}]')) IS NULL"
+        node = if value.nil?
+          # For nil values in MySQL JSON:
+          # - Key doesn't exist: JSON_EXTRACT returns SQL NULL → JSON_TYPE returns SQL NULL
+          # - Key exists with JSON null: JSON_EXTRACT returns JSON null → JSON_TYPE returns 'NULL'
+          # We want records where the key EXISTS AND the value at that index is JSON null
+          sql = "(JSON_CONTAINS_PATH(rec_delta, 'one', '#{path}') AND JSON_TYPE(JSON_EXTRACT(rec_delta, '#{path}[#{ary_index}]')) = 'NULL')"
           ::Arel::Nodes::SqlLiteral.new(sql)
         else
           # For non-NULL values in MySQL
-          sql = "JSON_UNQUOTE(JSON_EXTRACT(rec_delta, '$.\"#{safe_col_name}\"[#{ary_index}]'))"
-          ::Arel::Nodes::SqlLiteral.new(sql).eq(
-            ::Arel::Nodes::BindParam.new(value.to_s)
-          )
+          sql = "JSON_UNQUOTE(JSON_EXTRACT(rec_delta, '#{path}[#{ary_index}]'))"
+          ::Arel::Nodes::SqlLiteral.new(sql).eq(value.to_s)
         end
 
         scope.where(node)

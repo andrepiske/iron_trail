@@ -21,7 +21,7 @@ RSpec.describe PeopleManager do
       expect(results.length).to be 1
 
       if mysql_adapter?
-        record_new = JSON.parse(results.first['rec_new'] || results.first[4])
+        record_new = JSON.parse(results.first[7])
       else
         record_new = JSON.parse(results.first['rec_new'])
       end
@@ -104,7 +104,7 @@ RSpec.describe PeopleManager do
           end
           actual_names = res.map do |change_record|
             if mysql_adapter?
-              new_record = JSON.parse(change_record['rec_new'] || change_record[5])
+              new_record = JSON.parse(change_record[7])
             else
               new_record = JSON.parse(change_record['rec_new'])
             end
