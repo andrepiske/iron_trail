@@ -3,6 +3,7 @@
 RSpec.describe IronTrail::DbFunctions do
   subject(:instance) { described_class.new(connection) }
   let(:connection) { ActiveRecord::Base.connection }
+  let(:mysql_adapter) { connection.adapter_name.downcase.include?('mysql') }
 
   let(:default_tables) do
     %w[
@@ -18,7 +19,11 @@ RSpec.describe IronTrail::DbFunctions do
     subject(:table_names) { instance.collect_all_tables }
 
     before do
-      connection.execute('CREATE TABLE qux (foo TEXT);')
+      if mysql_adapter
+        connection.execute('CREATE TABLE qux (foo VARCHAR(255));')
+      else
+        connection.execute('CREATE TABLE qux (foo TEXT);')
+      end
     end
 
     it 'contains all tables' do
@@ -42,15 +47,21 @@ RSpec.describe IronTrail::DbFunctions do
       end
     end
 
-    context 'with extra untracked tables' do
+    context 'with extra untracked tables', :postgresql_only do
       before do
-        connection.execute(<<~SQL)
-          CREATE TABLE foo (id INTEGER);
-          CREATE TABLE bar (id INTEGER);
+        if mysql_adapter
+          connection.execute('CREATE TABLE foo (id INT);')
+          connection.execute('CREATE TABLE bar (id INT);')
+          connection.execute("CREATE TRIGGER iron_trail_log_changes_insert AFTER INSERT ON bar FOR EACH ROW BEGIN CALL irontrail_log_row_insert('bar', CAST(NEW.id AS CHAR), JSON_OBJECT('id', NEW.id)); END;")
+        else
+          connection.execute(<<~SQL)
+            CREATE TABLE foo (id INTEGER);
+            CREATE TABLE bar (id INTEGER);
 
-          CREATE TRIGGER iron_trail_log_changes AFTER INSERT OR UPDATE OR DELETE ON
-            bar FOR EACH ROW EXECUTE FUNCTION irontrail_log_row();
-        SQL
+            CREATE TRIGGER iron_trail_log_changes AFTER INSERT OR UPDATE OR DELETE ON
+              bar FOR EACH ROW EXECUTE FUNCTION irontrail_log_row();
+          SQL
+        end
       end
 
       it 'tracks default tables and bar but foo' do
@@ -80,7 +91,11 @@ RSpec.describe IronTrail::DbFunctions do
 
     context 'with new untracked tables' do
       before do
-        connection.execute('CREATE TABLE foobar (id INTEGER);')
+        if mysql_adapter
+          connection.execute('CREATE TABLE foobar (id INT);')
+        else
+          connection.execute('CREATE TABLE foobar (id INTEGER);')
+        end
       end
 
       it 'does not include untracked tables' do
@@ -100,9 +115,13 @@ RSpec.describe IronTrail::DbFunctions do
 
     context 'when it is not empty' do
       before do
-        connection.execute(<<~SQL)
-        INSERT INTO "irontrail_trigger_errors" (query) VALUES ('foo');
-        SQL
+        if mysql_adapter
+          connection.execute("INSERT INTO irontrail_trigger_errors (query) VALUES ('foo');")
+        else
+          connection.execute(<<~SQL)
+          INSERT INTO "irontrail_trigger_errors" (query) VALUES ('foo');
+          SQL
+        end
       end
 
       it 'what do you think it is now huh' do
@@ -124,10 +143,14 @@ RSpec.describe IronTrail::DbFunctions do
 
     context 'when there are trigger errors' do
       before do
-        connection.execute(<<~SQL)
-        INSERT INTO "irontrail_trigger_errors" (id, query, created_at) VALUES
-          (42, 'foo', '2023-06-15T12:01:03Z');
-        SQL
+        if mysql_adapter
+          connection.execute("INSERT INTO irontrail_trigger_errors (id, query, created_at) VALUES (42, 'foo', '2023-06-15 12:01:03');")
+        else
+          connection.execute(<<~SQL)
+          INSERT INTO "irontrail_trigger_errors" (id, query, created_at) VALUES
+            (42, 'foo', '2023-06-15T12:01:03Z');
+          SQL
+        end
       end
 
       it 'matches the max created_at and ids' do

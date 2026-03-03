@@ -1,25 +1,50 @@
 class CreateIrontrailChanges < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
-    create_table :irontrail_changes, primary_key: [:id, :created_at] do |t|
-      t.column :id, :bigserial, null: false
-      t.column :actor_type, :text
-      t.column :actor_id, :text
-      t.column :rec_table, :text
-      t.column :rec_id, :text
-      t.column :operation, :text
+    adapter = connection.adapter_name.downcase
+    
+    if adapter.include?('mysql')
+      create_table :irontrail_changes, id: :bigint, auto_increment: true do |t|
+        t.column :actor_type, :string, limit: 255
+        t.column :actor_id, :string, limit: 255
+        t.column :rec_table, :string, limit: 255
+        t.column :rec_id, :string, limit: 255
+        t.column :operation, :string, limit: 10
 
-      t.column :rec_old, :jsonb
-      t.column :rec_new, :jsonb
-      t.column :rec_delta, :jsonb
-      t.column :metadata, :jsonb
+        t.column :rec_old, :json
+        t.column :rec_new, :json
+        t.column :rec_delta, :json
+        t.column :metadata, :json
 
-      t.column :created_at, :timestamp, null: false
+        t.column :created_at, :timestamp, null: false
+      end
+    else
+      # PostgreSQL version
+      create_table :irontrail_changes, primary_key: [:id, :created_at] do |t|
+        t.column :id, :bigserial, null: false
+        t.column :actor_type, :text
+        t.column :actor_id, :text
+        t.column :rec_table, :text
+        t.column :rec_id, :text
+        t.column :operation, :text
+
+        t.column :rec_old, :jsonb
+        t.column :rec_new, :jsonb
+        t.column :rec_delta, :jsonb
+        t.column :metadata, :jsonb
+
+        t.column :created_at, :timestamp, null: false
+      end
     end
 
     add_index :irontrail_changes, :rec_id
     add_index :irontrail_changes, :rec_table
     add_index :irontrail_changes, :actor_id
     add_index :irontrail_changes, :actor_type
-    add_index :irontrail_changes, :created_at, using: :brin
+    
+    if adapter.include?('postgresql')
+      add_index :irontrail_changes, :created_at, using: :brin
+    else
+      add_index :irontrail_changes, :created_at
+    end
   end
 end

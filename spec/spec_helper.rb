@@ -45,4 +45,13 @@ require_relative 'support/iron_trail_spec_migrator'
 RSpec.configure do |config|
   config.use_transactional_fixtures = true
   config.include ActiveSupport::Testing::TimeHelpers
+  
+  # Skip tests that are PostgreSQL-specific when running MySQL
+  config.around(:each, :postgresql_only) do |example|
+    if ActiveRecord::Base.connection.adapter_name.downcase.include?('postgresql')
+      example.run
+    else
+      skip "This test is PostgreSQL-specific"
+    end
+  end
 end
