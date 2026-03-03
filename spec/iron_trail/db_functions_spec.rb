@@ -18,7 +18,11 @@ RSpec.describe IronTrail::DbFunctions do
     subject(:table_names) { instance.collect_all_tables }
 
     before do
-      connection.execute('CREATE TABLE qux (foo TEXT);')
+      connection.execute('CREATE TABLE IF NOT EXISTS qux (foo TEXT)')
+    end
+
+    after do
+      connection.execute('DROP TABLE IF EXISTS qux')
     end
 
     it 'contains all tables' do
@@ -44,13 +48,15 @@ RSpec.describe IronTrail::DbFunctions do
 
     context 'with extra untracked tables' do
       before do
-        connection.execute(<<~SQL)
-          CREATE TABLE foo (id INTEGER);
-          CREATE TABLE bar (id INTEGER);
+        connection.execute('CREATE TABLE IF NOT EXISTS foo (id INTEGER)')
+        connection.execute('CREATE TABLE IF NOT EXISTS bar (id INTEGER)')
+        instance.enable_tracking_for_table('bar')
+      end
 
-          CREATE TRIGGER iron_trail_log_changes AFTER INSERT OR UPDATE OR DELETE ON
-            bar FOR EACH ROW EXECUTE FUNCTION irontrail_log_row();
-        SQL
+      after do
+        instance.disable_tracking_for_table('bar') rescue nil
+        connection.execute('DROP TABLE IF EXISTS foo')
+        connection.execute('DROP TABLE IF EXISTS bar')
       end
 
       it 'tracks default tables and bar but foo' do
@@ -80,7 +86,11 @@ RSpec.describe IronTrail::DbFunctions do
 
     context 'with new untracked tables' do
       before do
-        connection.execute('CREATE TABLE foobar (id INTEGER);')
+        connection.execute('CREATE TABLE IF NOT EXISTS foobar (id INTEGER)')
+      end
+
+      after do
+        connection.execute('DROP TABLE IF EXISTS foobar')
       end
 
       it 'does not include untracked tables' do
@@ -100,9 +110,7 @@ RSpec.describe IronTrail::DbFunctions do
 
     context 'when it is not empty' do
       before do
-        connection.execute(<<~SQL)
-        INSERT INTO "irontrail_trigger_errors" (query) VALUES ('foo');
-        SQL
+        connection.execute("INSERT INTO `irontrail_trigger_errors` (query) VALUES ('foo')")
       end
 
       it 'what do you think it is now huh' do
@@ -124,10 +132,7 @@ RSpec.describe IronTrail::DbFunctions do
 
     context 'when there are trigger errors' do
       before do
-        connection.execute(<<~SQL)
-        INSERT INTO "irontrail_trigger_errors" (id, query, created_at) VALUES
-          (42, 'foo', '2023-06-15T12:01:03Z');
-        SQL
+        connection.execute("INSERT INTO `irontrail_trigger_errors` (id, query, created_at) VALUES (42, 'foo', '2023-06-15 12:01:03')")
       end
 
       it 'matches the max created_at and ids' do

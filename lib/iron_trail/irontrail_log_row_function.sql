@@ -1,96 +1,130 @@
-CREATE OR REPLACE FUNCTION irontrail_log_row()
-RETURNS TRIGGER AS $$
-DECLARE
-  u_changes JSONB;
-  key TEXT;
-  it_meta TEXT;
-  it_meta_obj JSONB;
-  value_a JSONB;
-  value_b JSONB;
-  old_obj JSONB;
-  new_obj JSONB;
-  actor_type TEXT;
-  actor_id TEXT;
-  created_at TIMESTAMP;
+DROP PROCEDURE IF EXISTS irontrail_log_row;
 
-  err_text TEXT; err_detail TEXT; err_hint TEXT; err_ctx TEXT;
+CREATE PROCEDURE irontrail_log_row(
+  IN p_operation CHAR(1),
+  IN p_table_name VARCHAR(255),
+  IN p_rec_id TEXT,
+  IN p_old_obj JSON,
+  IN p_new_obj JSON,
+  IN p_created_at_val DATETIME(6),
+  IN p_updated_at_old DATETIME(6),
+  IN p_updated_at_new DATETIME(6)
+)
 BEGIN
-    SELECT split_part(split_part(current_query(), '/*IronTrail ', 2), ' IronTrail*/', 1) INTO it_meta;
+  DECLARE v_it_meta TEXT;
+  DECLARE v_it_meta_obj JSON;
+  DECLARE v_actor_type TEXT;
+  DECLARE v_actor_id TEXT;
+  DECLARE v_created_at DATETIME(6);
+  DECLARE v_u_changes JSON;
+  DECLARE v_key_name VARCHAR(255);
+  DECLARE v_value_a JSON;
+  DECLARE v_value_b JSON;
+  DECLARE v_keys_done INT DEFAULT 0;
+  DECLARE v_all_keys JSON;
+  DECLARE v_i INT;
+  DECLARE v_num_keys INT;
+  DECLARE v_has_created_at INT DEFAULT 0;
+  DECLARE v_has_updated_at INT DEFAULT 0;
 
-    IF (it_meta <> '') THEN
-      it_meta_obj = it_meta::JSONB;
+  DECLARE EXIT HANDLER FOR SQLEXCEPTION
+  BEGIN
+    GET DIAGNOSTICS CONDITION 1
+      @p_sqlstate = RETURNED_SQLSTATE,
+      @p_message = MESSAGE_TEXT;
 
-      IF (it_meta_obj ? '_actor_type') THEN
-        actor_type = it_meta_obj->>'_actor_type';
-        it_meta_obj = it_meta_obj - '_actor_type';
-      END IF;
-      IF (it_meta_obj ? '_actor_id') THEN
-        actor_id = it_meta_obj->>'_actor_id';
-        it_meta_obj = it_meta_obj - '_actor_id';
-      END IF;
+    INSERT INTO `irontrail_trigger_errors` (`mysql_errcode`, `mysql_message`,
+        `err_text`, `op`, `table_name`,
+        `old_data`, `new_data`, `query`, `created_at`)
+      VALUES (@p_sqlstate, @p_message, @p_message, p_operation, p_table_name,
+        p_old_obj, p_new_obj, 'N/A', NOW(6));
+  END;
+
+  SET v_it_meta = @irontrail_metadata;
+
+  SET v_actor_type = NULL;
+  SET v_actor_id = NULL;
+  SET v_it_meta_obj = NULL;
+
+  IF v_it_meta IS NOT NULL AND v_it_meta != '' THEN
+    SET v_it_meta_obj = CAST(v_it_meta AS JSON);
+
+    IF JSON_CONTAINS_PATH(v_it_meta_obj, 'one', '$._actor_type') THEN
+      SET v_actor_type = JSON_UNQUOTE(JSON_EXTRACT(v_it_meta_obj, '$._actor_type'));
+      SET v_it_meta_obj = JSON_REMOVE(v_it_meta_obj, '$._actor_type');
     END IF;
-
-    old_obj = row_to_json(OLD);
-    new_obj = row_to_json(NEW);
-
-    IF (TG_OP = 'INSERT' AND new_obj ? 'created_at') THEN
-      created_at = NEW.created_at;
-    ELSIF (TG_OP = 'UPDATE' AND new_obj ? 'updated_at') THEN
-      IF (NEW.updated_at <> OLD.updated_at) THEN
-        created_at = NEW.updated_at;
-      END IF;
+    IF JSON_CONTAINS_PATH(v_it_meta_obj, 'one', '$._actor_id') THEN
+      SET v_actor_id = JSON_UNQUOTE(JSON_EXTRACT(v_it_meta_obj, '$._actor_id'));
+      SET v_it_meta_obj = JSON_REMOVE(v_it_meta_obj, '$._actor_id');
     END IF;
+  END IF;
 
-    IF (created_at IS NULL) THEN
-      created_at = STATEMENT_TIMESTAMP();
+  -- Determine created_at for the change record
+  SET v_created_at = NULL;
+
+  IF p_operation = 'i' AND p_created_at_val IS NOT NULL THEN
+    SET v_created_at = p_created_at_val;
+  ELSEIF p_operation = 'u' AND p_updated_at_new IS NOT NULL THEN
+    IF p_updated_at_old IS NULL OR p_updated_at_new != p_updated_at_old THEN
+      SET v_created_at = p_updated_at_new;
+    END IF;
+  END IF;
+
+  IF v_created_at IS NULL THEN
+    SET v_created_at = NOW(6);
+  ELSE
+    IF v_it_meta_obj IS NULL OR JSON_TYPE(v_it_meta_obj) = 'NULL' THEN
+      SET v_it_meta_obj = JSON_OBJECT('_db_created_at', DATE_FORMAT(NOW(6), '%Y-%m-%d %H:%i:%s.%f'));
     ELSE
-      it_meta_obj = jsonb_set(COALESCE(it_meta_obj, '{}'::jsonb), array['_db_created_at'], TO_JSONB(STATEMENT_TIMESTAMP()));
+      SET v_it_meta_obj = JSON_SET(v_it_meta_obj, '$._db_created_at', DATE_FORMAT(NOW(6), '%Y-%m-%d %H:%i:%s.%f'));
     END IF;
+  END IF;
 
-    IF (TG_OP = 'INSERT') THEN
-        INSERT INTO "irontrail_changes" ("actor_id", "actor_type",
-          "rec_table", "operation", "rec_id", "rec_new", "metadata", "created_at")
-        VALUES (actor_id, actor_type,
-          TG_TABLE_NAME, 'i', NEW.id, new_obj, it_meta_obj, created_at);
+  -- Normalize empty meta object
+  IF v_it_meta_obj IS NOT NULL AND JSON_TYPE(v_it_meta_obj) = 'OBJECT' AND JSON_LENGTH(v_it_meta_obj) = 0 THEN
+    SET v_it_meta_obj = NULL;
+  END IF;
 
-    ELSIF (TG_OP = 'UPDATE') THEN
-        IF (OLD <> NEW) THEN
-          u_changes = jsonb_build_object();
+  IF p_operation = 'i' THEN
+    INSERT INTO `irontrail_changes` (`actor_id`, `actor_type`,
+      `rec_table`, `operation`, `rec_id`, `rec_new`, `metadata`, `created_at`)
+    VALUES (v_actor_id, v_actor_type,
+      p_table_name, 'i', p_rec_id, p_new_obj, v_it_meta_obj, v_created_at);
 
-          FOR key IN (SELECT jsonb_object_keys(old_obj) UNION SELECT jsonb_object_keys(new_obj))
-          LOOP
-              value_a := old_obj->key;
-              value_b := new_obj->key;
-              IF value_a IS DISTINCT FROM value_b THEN
-                  u_changes := u_changes || jsonb_build_object(key, jsonb_build_array(value_a, value_b));
-              END IF;
-          END LOOP;
+  ELSEIF p_operation = 'u' THEN
+    -- Only log if there's an actual change
+    IF NOT (CAST(p_old_obj AS CHAR) = CAST(p_new_obj AS CHAR)) THEN
+      -- Compute delta
+      SET v_u_changes = JSON_OBJECT();
 
-          INSERT INTO "irontrail_changes" ("actor_id", "actor_type", "rec_table", "operation",
-            "rec_id", "rec_old", "rec_new", "rec_delta", "metadata", "created_at")
-          VALUES (actor_id, actor_type, TG_TABLE_NAME, 'u', NEW.id, old_obj, new_obj, u_changes, it_meta_obj, created_at);
+      -- Get all keys from both objects
+      SET v_all_keys = irontrail_merged_keys(p_old_obj, p_new_obj);
+      SET v_num_keys = JSON_LENGTH(v_all_keys);
+      SET v_i = 0;
 
+      WHILE v_i < v_num_keys DO
+        SET v_key_name = JSON_UNQUOTE(JSON_EXTRACT(v_all_keys, CONCAT('$[', v_i, ']')));
+        SET v_value_a = JSON_EXTRACT(p_old_obj, CONCAT('$.', v_key_name));
+        SET v_value_b = JSON_EXTRACT(p_new_obj, CONCAT('$.', v_key_name));
+
+        IF NOT (v_value_a <=> v_value_b) OR
+           (v_value_a IS NULL AND v_value_b IS NOT NULL) OR
+           (v_value_a IS NOT NULL AND v_value_b IS NULL) THEN
+          SET v_u_changes = JSON_SET(v_u_changes, CONCAT('$.', v_key_name), JSON_ARRAY(v_value_a, v_value_b));
         END IF;
-    ELSIF (TG_OP = 'DELETE') THEN
-        INSERT INTO "irontrail_changes" ("actor_id", "actor_type", "rec_table", "operation",
-          "rec_id", "rec_old", "metadata", "created_at")
-        VALUES (actor_id, actor_type, TG_TABLE_NAME, 'd', OLD.id, old_obj, it_meta_obj, created_at);
+
+        SET v_i = v_i + 1;
+      END WHILE;
+
+      INSERT INTO `irontrail_changes` (`actor_id`, `actor_type`, `rec_table`, `operation`,
+        `rec_id`, `rec_old`, `rec_new`, `rec_delta`, `metadata`, `created_at`)
+      VALUES (v_actor_id, v_actor_type, p_table_name, 'u', p_rec_id, p_old_obj, p_new_obj, v_u_changes, v_it_meta_obj, v_created_at);
 
     END IF;
-    RETURN NULL;
-EXCEPTION
-  WHEN OTHERS THEN
-    GET STACKED DIAGNOSTICS
-      err_text = MESSAGE_TEXT,
-      err_detail = PG_EXCEPTION_DETAIL,
-      err_hint = PG_EXCEPTION_HINT,
-      err_ctx = PG_EXCEPTION_CONTEXT;
+  ELSEIF p_operation = 'd' THEN
+    INSERT INTO `irontrail_changes` (`actor_id`, `actor_type`, `rec_table`, `operation`,
+      `rec_id`, `rec_old`, `metadata`, `created_at`)
+    VALUES (v_actor_id, v_actor_type, p_table_name, 'd', p_rec_id, p_old_obj, v_it_meta_obj, v_created_at);
 
-    INSERT INTO "irontrail_trigger_errors" ("pg_errcode", "pg_message",
-        "err_text", "ex_detail", "ex_hint", "ex_ctx", "op", "table_name",
-        "old_data", "new_data", "query", "created_at")
-      VALUES (SQLSTATE, SQLERRM, err_text, err_detail, err_hint, err_ctx,
-        TG_OP, TG_TABLE_NAME, row_to_json(OLD), row_to_json(NEW), current_query(), STATEMENT_TIMESTAMP());
-    RETURN NULL;
+  END IF;
 END;
-$$ LANGUAGE plpgsql;

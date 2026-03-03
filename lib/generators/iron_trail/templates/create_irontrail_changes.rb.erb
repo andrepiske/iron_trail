@@ -1,25 +1,24 @@
 class CreateIrontrailChanges < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
-    create_table :irontrail_changes, primary_key: [:id, :created_at] do |t|
-      t.column :id, :bigserial, null: false
+    create_table :irontrail_changes do |t|
       t.column :actor_type, :text
       t.column :actor_id, :text
       t.column :rec_table, :text
       t.column :rec_id, :text
       t.column :operation, :text
 
-      t.column :rec_old, :jsonb
-      t.column :rec_new, :jsonb
-      t.column :rec_delta, :jsonb
-      t.column :metadata, :jsonb
+      t.column :rec_old, :json
+      t.column :rec_new, :json
+      t.column :rec_delta, :json
+      t.column :metadata, :json
 
-      t.column :created_at, :timestamp, null: false
+      t.column :created_at, :datetime, precision: 6, null: false
     end
 
-    add_index :irontrail_changes, :rec_id
-    add_index :irontrail_changes, :rec_table
-    add_index :irontrail_changes, :actor_id
-    add_index :irontrail_changes, :actor_type
-    add_index :irontrail_changes, :created_at, using: :brin
+    add_index :irontrail_changes, :rec_id, length: 255
+    add_index :irontrail_changes, :rec_table, length: 255
+    add_index :irontrail_changes, :actor_id, length: 255
+    add_index :irontrail_changes, :actor_type, length: 255
+    add_index :irontrail_changes, :created_at
   end
 end
