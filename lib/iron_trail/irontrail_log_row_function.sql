@@ -10,7 +10,7 @@ CREATE PROCEDURE irontrail_log_row(
   IN p_updated_at_old DATETIME(6),
   IN p_updated_at_new DATETIME(6)
 )
-BEGIN
+proc_body: BEGIN
   DECLARE v_it_meta TEXT;
   DECLARE v_it_meta_obj JSON;
   DECLARE v_actor_type TEXT;
@@ -39,6 +39,12 @@ BEGIN
       VALUES (@p_sqlstate, @p_message, @p_message, p_operation, p_table_name,
         p_old_obj, p_new_obj, 'N/A', NOW(6));
   END;
+
+  -- Allow disabling via session variable (used by test helpers to avoid DDL
+  -- which would break transactional fixtures in MySQL).
+  IF @irontrail_disabled = 1 THEN
+    LEAVE proc_body;
+  END IF;
 
   SET v_it_meta = @irontrail_metadata;
 

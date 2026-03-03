@@ -27,34 +27,18 @@ module IronTrail
       attr_accessor :enabled
 
       def enable!
-        DbFunctions.new(ActiveRecord::Base.connection).install_functions
-        # Re-create all triggers to ensure they are pointing to the real procedure
-        db_fun = DbFunctions.new(ActiveRecord::Base.connection)
-        db_fun.collect_tracked_table_names.each do |table_name|
-          db_fun.disable_tracking_for_table(table_name)
-          db_fun.enable_tracking_for_table(table_name)
-        end
+        conn = ActiveRecord::Base.connection
+        # Use session variable to enable the stored procedure.
+        # This avoids DDL (DROP/CREATE PROCEDURE) which would implicitly
+        # commit any open transaction and break transactional test fixtures.
+        conn.execute("SET @irontrail_disabled = NULL")
         @enabled = true
       end
 
       def disable!
-        # We "disable" it by replacing the stored procedure with a no-op one.
         conn = ActiveRecord::Base.connection
-        conn.execute("DROP PROCEDURE IF EXISTS irontrail_log_row")
-        conn.execute(<<~SQL)
-          CREATE PROCEDURE irontrail_log_row(
-            IN p_operation CHAR(1),
-            IN p_table_name VARCHAR(255),
-            IN p_rec_id TEXT,
-            IN p_old_obj JSON,
-            IN p_new_obj JSON,
-            IN p_created_at_val DATETIME(6),
-            IN p_updated_at_old DATETIME(6),
-            IN p_updated_at_new DATETIME(6)
-          )
-          BEGIN
-          END
-        SQL
+        # Use session variable to make the stored procedure a no-op.
+        conn.execute("SET @irontrail_disabled = 1")
         @enabled = false
       end
 

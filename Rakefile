@@ -1,5 +1,5 @@
 # frozen_string_literal: true
-ENV['DB'] ||= 'postgres'
+ENV['DB'] ||= 'mysql'
 require 'fileutils'
 require 'bundler'
 
@@ -19,20 +19,19 @@ end
 
 desc 'Delete generated files and databases'
 task :clean do
-  use_docker = ENV['IRONTRAIL_TEST_DOCKER']
-  db = ENV.fetch('DB', 'postgres')
-  puts "Will drop #{db} database"
+  db = ENV.fetch('DB', 'mysql')
+  db_name = ENV.fetch('IRONTRAIL_CI_DATABASE', 'iron_trail_test')
+  puts "Will drop #{db} database '#{db_name}'"
 
   case db
-  when 'postgres'
-    command =
-      if use_docker
-        "docker exec -t #{use_docker} dropdb -U postgres --if-exists iron_trail_test"
-      else
-        "dropdb --if-exists iron_trail_test > /dev/null 2>&1"
-      end
+  when 'mysql'
+    host = ENV.fetch('IRONTRAIL_CI_DB_HOST', '127.0.0.1')
+    port = ENV.fetch('IRONTRAIL_CI_DB_PORT', '3306')
+    user = ENV.fetch('IRONTRAIL_CI_DB_USER', 'root')
+    password = ENV.fetch('IRONTRAIL_CI_DB_PASSWORD', '')
 
-    system(command)
+    pwd_arg = password.empty? ? '' : "-p#{password}"
+    system("mysql -h #{host} -P #{port} -u #{user} #{pwd_arg} -e 'DROP DATABASE IF EXISTS `#{db_name}`' > /dev/null 2>&1")
   else
     raise "Don't know DB '#{db}'"
   end
@@ -49,20 +48,19 @@ end
 
 desc 'Create the database.'
 task :create_db do
-  use_docker = ENV['IRONTRAIL_TEST_DOCKER']
-  db = ENV.fetch('DB', 'postgres')
-  puts "Will create #{db} database"
+  db = ENV.fetch('DB', 'mysql')
+  db_name = ENV.fetch('IRONTRAIL_CI_DATABASE', 'iron_trail_test')
+  puts "Will create #{db} database '#{db_name}'"
 
   case db
-  when 'postgres'
-    command =
-      if use_docker
-        "docker exec -t #{use_docker} createdb -U postgres iron_trail_test"
-      else
-        "createdb iron_trail_test > /dev/null 2>&1"
-      end
+  when 'mysql'
+    host = ENV.fetch('IRONTRAIL_CI_DB_HOST', '127.0.0.1')
+    port = ENV.fetch('IRONTRAIL_CI_DB_PORT', '3306')
+    user = ENV.fetch('IRONTRAIL_CI_DB_USER', 'root')
+    password = ENV.fetch('IRONTRAIL_CI_DB_PASSWORD', '')
 
-    system(command)
+    pwd_arg = password.empty? ? '' : "-p#{password}"
+    system("mysql -h #{host} -P #{port} -u #{user} #{pwd_arg} -e 'CREATE DATABASE IF NOT EXISTS `#{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci'")
   else
     raise "Don't know DB '#{db}'"
   end

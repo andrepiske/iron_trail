@@ -18,21 +18,26 @@ module IronTrail
 
     def create_query_transformer_proc
       proc do |query, adapter|
-        current_metadata = IronTrail::Current.metadata
-        if adapter.write_query?(query) && (current_metadata.is_a?(Hash) && !current_metadata.empty?)
-          metadata = JSON.dump(current_metadata)
+        if adapter.write_query?(query)
+          current_metadata = IronTrail::Current.metadata
 
-          if metadata.length > METADATA_MAX_LENGTH
-            Rails.logger.warn("IronTrail metadata is longer than maximum length! #{metadata.length} > #{METADATA_MAX_LENGTH}")
-          else
-            # Use MySQL session variable to pass metadata to triggers
-            safe_md = metadata.gsub("'", "\\\\'")
-            # We set the session variable before the write query
-            begin
-              ActiveRecord::Base.connection.execute("SET @irontrail_metadata = '#{safe_md}'")
-            rescue => e
-              Rails.logger.warn("IronTrail failed to set metadata session variable: #{e.message}")
+          begin
+            if current_metadata.is_a?(Hash) && !current_metadata.empty?
+              metadata = JSON.dump(current_metadata)
+
+              if metadata.length > METADATA_MAX_LENGTH
+                Rails.logger.warn("IronTrail metadata is longer than maximum length! #{metadata.length} > #{METADATA_MAX_LENGTH}")
+              else
+                safe_md = metadata.gsub("'", "\\\\'")
+                ActiveRecord::Base.connection.execute("SET @irontrail_metadata = '#{safe_md}'")
+              end
+            else
+              # Clear the session variable so stale metadata from a previous
+              # write is not picked up by the trigger.
+              ActiveRecord::Base.connection.execute("SET @irontrail_metadata = NULL")
             end
+          rescue => e
+            Rails.logger.warn("IronTrail failed to set metadata session variable: #{e.message}")
           end
         end
         query
