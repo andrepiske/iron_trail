@@ -1,18 +1,37 @@
 class CreateIrontrailSupportTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
-    create_table :irontrail_trigger_errors, id: :bigserial do |t|
-      t.column :pg_errcode, :text
-      t.column :pg_message, :text
-      t.column :err_text, :text
-      t.column :ex_detail, :text
-      t.column :ex_hint, :text
-      t.column :ex_ctx, :text
-      t.column :op, :text
-      t.column :table_name, :text
-      t.column :old_data, :jsonb
-      t.column :new_data, :jsonb
-      t.column :query, :text
-      t.column :created_at, :timestamp
+    adapter = connection.adapter_name.downcase
+    
+    if adapter.include?('mysql')
+      create_table :irontrail_trigger_errors, id: :bigint, auto_increment: true do |t|
+        t.column :pg_errcode, :string, limit: 50
+        t.column :pg_message, :string, limit: 1000
+        t.column :err_text, :string, limit: 1000
+        t.column :ex_detail, :string, limit: 1000
+        t.column :ex_hint, :string, limit: 1000
+        t.column :ex_ctx, :string, limit: 1000
+        t.column :op, :string, limit: 10
+        t.column :table_name, :string, limit: 255
+        t.column :old_data, :json
+        t.column :new_data, :json
+        t.column :query, :text
+        t.column :created_at, :timestamp
+      end
+    else
+      create_table :irontrail_trigger_errors, id: :bigserial do |t|
+        t.column :pg_errcode, :text
+        t.column :pg_message, :text
+        t.column :err_text, :text
+        t.column :ex_detail, :text
+        t.column :ex_hint, :text
+        t.column :ex_ctx, :text
+        t.column :op, :text
+        t.column :table_name, :text
+        t.column :old_data, :jsonb
+        t.column :new_data, :jsonb
+        t.column :query, :text
+        t.column :created_at, :timestamp
+      end
     end
   end
 end

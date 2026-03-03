@@ -33,6 +33,14 @@ task :clean do
       end
 
     system(command)
+  when 'mysql'
+    mysql_host = ENV.fetch('IRONTRAIL_CI_DB_HOST', '127.0.0.1')
+    mysql_port = ENV.fetch('IRONTRAIL_CI_DB_PORT', '3306')
+    mysql_user = ENV.fetch('IRONTRAIL_CI_DB_USER', 'root')
+    mysql_password = ENV.fetch('IRONTRAIL_CI_DB_PASSWORD', '')
+    
+    command = "mysql -h #{mysql_host} -P #{mysql_port} -u #{mysql_user} -p#{mysql_password} -e \"DROP DATABASE IF EXISTS iron_trail_test;\" > /dev/null 2>&1"
+    system(command)
   else
     raise "Don't know DB '#{db}'"
   end
@@ -62,6 +70,14 @@ task :create_db do
         "createdb iron_trail_test > /dev/null 2>&1"
       end
 
+    system(command)
+  when 'mysql'
+    mysql_host = ENV.fetch('IRONTRAIL_CI_DB_HOST', '127.0.0.1')
+    mysql_port = ENV.fetch('IRONTRAIL_CI_DB_PORT', '3306')
+    mysql_user = ENV.fetch('IRONTRAIL_CI_DB_USER', 'root')
+    mysql_password = ENV.fetch('IRONTRAIL_CI_DB_PASSWORD', '')
+    
+    command = "mysql -h #{mysql_host} -P #{mysql_port} -u #{mysql_user} -p#{mysql_password} -e \"CREATE DATABASE IF NOT EXISTS iron_trail_test;\" > /dev/null 2>&1"
     system(command)
   else
     raise "Don't know DB '#{db}'"

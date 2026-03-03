@@ -3,16 +3,28 @@
 RSpec.describe PeopleManager do
   subject(:instance) { described_class.new }
 
+  def mysql_adapter?
+    ActiveRecord::Base.connection.adapter_name.downcase.include?('mysql')
+  end
+
   describe '#give_birth_to' do
     it 'has a birth history' do
       person = instance.give_birth_to('John', 'Doe', at: Time.now)
 
       expect(person.persisted?).to be true
 
-      results = ActiveRecord::Base.connection.execute("select * from irontrail_changes WHERE rec_table='people' AND rec_id=#{person.id}::text").to_a
+      if mysql_adapter?
+        results = ActiveRecord::Base.connection.execute("select * from irontrail_changes WHERE rec_table='people' AND rec_id='#{person.id}'").to_a
+      else
+        results = ActiveRecord::Base.connection.execute("select * from irontrail_changes WHERE rec_table='people' AND rec_id=#{person.id}::text").to_a
+      end
       expect(results.length).to be 1
 
-      record_new = JSON.parse(results.first['rec_new'])
+      if mysql_adapter?
+        record_new = JSON.parse(results.first[7])
+      else
+        record_new = JSON.parse(results.first['rec_new'])
+      end
       expect(record_new).to eq(person.as_json)
     end
   end
@@ -50,30 +62,52 @@ RSpec.describe PeopleManager do
       it 'registers the right amount of changes' do
         people # Ensure people exist beforehand
 
-        expect { guitar_ids }.to change {
-          ActiveRecord::Base.connection.execute("select count(*) as c from irontrail_changes").to_a.first['c'].to_i
-        }.by(expected_change_count)
+        if mysql_adapter?
+          expect { guitar_ids }.to change {
+            ActiveRecord::Base.connection.execute("select count(*) as c from irontrail_changes").to_a.first[0].to_i
+          }.by(expected_change_count)
 
-        # expect no errors
-        res = ActiveRecord::Base.connection.execute("select count(*) as c from irontrail_trigger_errors").to_a.first
-        expect(res['c']).to eq(0)
+          # expect no errors
+          res = ActiveRecord::Base.connection.execute("select count(*) as c from irontrail_trigger_errors").to_a.first
+          expect(res[0]).to eq(0)
+        else
+          expect { guitar_ids }.to change {
+            ActiveRecord::Base.connection.execute("select count(*) as c from irontrail_changes").to_a.first['c'].to_i
+          }.by(expected_change_count)
+
+          # expect no errors
+          res = ActiveRecord::Base.connection.execute("select count(*) as c from irontrail_trigger_errors").to_a.first
+          expect(res['c']).to eq(0)
+        end
       end
 
       it 'creates the right change records per person based on person ID' do
         guitar_ids
 
         people.each do |person|
-          res = ActiveRecord::Base.connection.execute(<<~SQL).to_a
-            SELECT * FROM irontrail_changes WHERE
-            rec_table='guitars' AND rec_new->>'person_id'='#{person.id}'
-            ORDER BY id ASC
-          SQL
+          if mysql_adapter?
+            res = ActiveRecord::Base.connection.execute(<<~SQL).to_a
+              SELECT * FROM irontrail_changes WHERE
+              rec_table='guitars' AND JSON_UNQUOTE(JSON_EXTRACT(rec_new, '$.person_id'))='#{person.id}'
+              ORDER BY id ASC
+            SQL
+          else
+            res = ActiveRecord::Base.connection.execute(<<~SQL).to_a
+              SELECT * FROM irontrail_changes WHERE
+              rec_table='guitars' AND rec_new->>'person_id'='#{person.id}'
+              ORDER BY id ASC
+            SQL
+          end
 
           expected_guitar_names = described_class::CLASSIC_GUITARS.map do |n|
             "#{n} #{person.full_name}"
           end
           actual_names = res.map do |change_record|
-            new_record = JSON.parse(change_record['rec_new'])
+            if mysql_adapter?
+              new_record = JSON.parse(change_record[7])
+            else
+              new_record = JSON.parse(change_record['rec_new'])
+            end
             new_record['description']
           end
 

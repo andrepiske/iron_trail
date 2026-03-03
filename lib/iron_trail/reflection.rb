@@ -22,12 +22,19 @@ module IronTrail
 
       # record_id is always of type text, but the foreign table primary key
       # could be anything (int, uuid, ...), so let's cast it to text.
+      # MySQL uses CHAR instead of text for string casting
+      cast_type = if klass.connection.adapter_name.downcase.include?('mysql')
+        'CHAR'
+      else
+        'text'
+      end
+
       foreign_value = ::Arel::Nodes::NamedFunction.new(
         'CAST',
         [
           ::Arel::Nodes::As.new(
             foreign_table[foreign_key_column_name],
-            ::Arel::Nodes::SqlLiteral.new('text')
+            ::Arel::Nodes::SqlLiteral.new(cast_type)
           ),
         ]
       )

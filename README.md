@@ -9,12 +9,15 @@ and triggers.
 Using database triggers has the benefit of not depending on ActiveRecord callbacks
 which can be skipped and could often result in missed change captures.
 
-It works with PostgreSQL databases only.
+It works with PostgreSQL and MySQL databases.
 
 ## How it works
 
-The tracking occurs in the PL/pgSQL function ([here][irontrail_log_row_function])
-which has to be attached to tables with a CREATE TRIGGER statement.
+The tracking occurs in database-specific functions:
+- PostgreSQL: PL/pgSQL function ([here][irontrail_log_row_function])
+- MySQL: Stored procedures ([here][irontrail_log_row_procedure_mysql])
+
+Triggers are attached to tables to automatically log changes.
 
 Every change to every row is logged into the `irontrail_changes` table, which
 stores both old and new record versions in JSON format as well as a _delta_
@@ -113,7 +116,7 @@ production environments.
 
 ### Enable tracking
 
-To enable tracking for all tables if your Postgres, except the ones you
+To enable tracking for all tables, except the ones you
 configured to be ignored, run:
 
 ```
@@ -148,4 +151,25 @@ rake iron_trail:tracking:status
 ```
 
 [irontrail_log_row_function]: lib/iron_trail/irontrail_log_row_function.sql
+[irontrail_log_row_procedure_mysql]: lib/iron_trail/irontrail_log_row_procedure_mysql_insert.sql
 [postgres_ddl_partitioning]: https://www.postgresql.org/docs/current/ddl-partitioning.html
+
+## Database Support
+
+### PostgreSQL (Full Support)
+- All features fully supported
+- JSONB column type for efficient JSON storage
+- timestamptz for timezone-aware timestamps
+- Native UUID type
+- Query comment metadata injection
+- BRIN indexes for time-series data
+
+### MySQL (Partial Support)
+- Core CDC functionality works (INSERT/UPDATE/DELETE tracking)
+- JSON column type (instead of JSONB)
+- TIMESTAMP type (instead of timestamptz)
+- VARCHAR(36) for UUIDs
+- ⚠️ Metadata injection (actor_id, custom metadata) not yet supported
+- ⚠️ Delta calculation simplified (full records stored instead of diffs)
+
+To use with MySQL, ensure you have the mysql2 gem installed. The gem will automatically detect your database adapter and use appropriate SQL.

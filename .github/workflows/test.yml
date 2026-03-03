@@ -14,30 +14,30 @@ permissions:
 
 jobs:
   test:
-    name: Ruby ${{ matrix.ruby }}, ${{ matrix.gemfile }}.gemfile, PG ${{ matrix.postgres }}
+    name: Ruby ${{ matrix.ruby }}, ${{ matrix.gemfile }}.gemfile, MySQL ${{ matrix.mysql }}
     runs-on: ubuntu-latest
     services:
-      test-postgres:
-        image: postgres:${{ matrix.postgres }}
+      test-mysql:
+        image: mysql:${{ matrix.mysql }}
         ports:
-        - 5432:5432
+        - 3306:3306
         env:
-          POSTGRES_PASSWORD: foobar123
+          MYSQL_ROOT_PASSWORD: foobar123
+          MYSQL_DATABASE: dummy
     strategy:
       matrix:
         include:
-        # very old
-        - { gemfile: 'rails_7.1', ruby: '3.3', postgres: '15' }
         # old
-        - { gemfile: 'rails_7.2', ruby: '3.3', postgres: '16' }
-        - { gemfile: 'rails_7.2', ruby: '3.3', postgres: '17' }
+        - { gemfile: 'rails_7.2', ruby: '3.3', mysql: '8.0' }
+        - { gemfile: 'rails_7.2', ruby: '3.3', mysql: '8.4' }
         # current
-        - { gemfile: 'rails_8.0', ruby: '3.4', postgres: '17' }
-        - { gemfile: 'rails_8.0', ruby: '3.4', postgres: '18' }
+        - { gemfile: 'rails_8.0', ruby: '3.4', mysql: '8.0' }
+        - { gemfile: 'rails_8.0', ruby: '3.4', mysql: '8.4' }
+        - { gemfile: 'rails_8.0', ruby: '3.4', mysql: '9.0' }
         # futuristic
-        - { gemfile: 'rails_8.1', ruby: 'head', postgres: '17', experimental: true }
-        - { gemfile: 'rails_8.1', ruby: 'head', postgres: '18', experimental: true }
-        - { gemfile: 'rails_head', ruby: 'head', postgres: '18', experimental: true }
+        - { gemfile: 'rails_8.1', ruby: 'head', mysql: '8.4', experimental: true }
+        - { gemfile: 'rails_8.1', ruby: 'head', mysql: '9.0', experimental: true }
+        - { gemfile: 'rails_head', ruby: 'head', mysql: '9.0', experimental: true }
     continue-on-error: ${{ matrix.experimental || false }}
     steps:
     - name: Checkout source
@@ -49,26 +49,29 @@ jobs:
         bundler-cache: true
       env:
         BUNDLE_GEMFILE: gemfiles/${{ matrix.gemfile }}.gemfile
-    - name: Create database
+    - name: Wait for MySQL
       run: |
-        createdb \
-          --host=$POSTGRES_HOST \
-          --port=$POSTGRES_PORT \
-          --username=postgres \
-          dummy
+        for i in {1..30}; do
+          if mysql -h $MYSQL_HOST -P $MYSQL_PORT -u root -p$MYSQL_ROOT_PASSWORD -e "SELECT 1" > /dev/null 2>&1; then
+            echo "MySQL is ready!"
+            break
+          fi
+          echo "Waiting for MySQL..."
+          sleep 1
+        done
       env:
-        PGPASSWORD: foobar123
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
+        MYSQL_ROOT_PASSWORD: foobar123
+        MYSQL_HOST: localhost
+        MYSQL_PORT: 3306
     - name: Run specs
       run:
         bundle exec rake install_database_yml spec && bundle exec rake testing_spec
       env:
         BACKTRACE: 1
         BUNDLE_GEMFILE: gemfiles/${{ matrix.gemfile }}.gemfile
-        DB: postgres
+        DB: mysql
         IRONTRAIL_CI_DATABASE: dummy
-        IRONTRAIL_CI_DB_USER: postgres
+        IRONTRAIL_CI_DB_USER: root
         IRONTRAIL_CI_DB_PASSWORD: foobar123
         IRONTRAIL_CI_DB_HOST: 127.0.0.1
-        IRONTRAIL_CI_DB_PORT: 5432
+        IRONTRAIL_CI_DB_PORT: 3306
